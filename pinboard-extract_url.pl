@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 # Copyright 2012 Srijith K. Nair. All rights reserved.
 # 
@@ -31,53 +31,61 @@ use Curses qw(KEY_ENTER);
 use Curses::UI; 
 use URI;
 use URI::Escape;
-use Net::Delicious;
 use LWP::UserAgent;
 
 #config
-my $pinboard_username = 'USERNAME'; # <---- change me
-my $pinboard_password = 'PASSWORD'; # <---- change me
-my $tag = 'frommutt';               # <---- change (?)
+my $API_token='CHANGE ME';      # Get this at https://pinboard.in/settings/password
+my $follow_redirect = 1;        # Better to enable this but it can get a bit slower
+my $tag = 'frommutt';           # Pinboard tag for created entries 
+my $DEBUG = 0;                  # some debug prints enabled if set to 1
+$Curses::UI::debug = 0;         # Built in Curses debug
 #end of config
 
-$Curses::UI::debug = 0;
-my $DEBUG = 0;          # some debug prints enabled if set to 1
+my $API_URL='https://api.pinboard.in/v1/posts/add?';
+my $bkmrk_url='';
 my $title_entry = '';
 
-my $url='';
-
 if ($ARGV[0] eq '') {
-    print "Error";
+    print "Error: No URL provided!";
 }
 
-#Get redirected URL's permalink
-my $ua = LWP::UserAgent->new(
-    requests_redirectable => [],
-);
-my $res = $ua->get($ARGV[0]);
-if ($res->code == 301)
-	{$url = $res->header( 'location');}
-else
-	{$url = $ARGV[0];}
+if ($follow_redirect) {
+    print "Redirection check enabled:\n" if $DEBUG;
+    # Get redirected URL's permalink
+    my $ua = LWP::UserAgent->new(
+        requests_redirectable => [],
+    );
+    my $res = $ua->get($ARGV[0]);
+    if ($res->code == 301) {
+        print "\tRedirection happened \n" if $DEBUG;
+        $bkmrk_url = $res->header( 'location');
+    } else {
+        print "\tNo redirection happened\n" if $DEBUG;
+        $bkmrk_url = $ARGV[0];
+    }
+} else {
+    print "Redirection check disabled\n" if $DEBUG;
+    $bkmrk_url = $ARGV[0];
+}
 
-my $urlobj = URI->new($url);
+my $urlobj = URI->new($bkmrk_url);
 my @pathseg = $urlobj->path_segments( );
 
 if ($DEBUG) {
+    print "URL: $bkmrk_url\n";
     print "Number of segments: " . scalar @pathseg . "\n";
     for (my $i=0; $i < @pathseg; $i++) {
         print "\t $i - {$pathseg[$i]}\n";
     }
 }
-
-my $chopchr = chop ($url);
+my $chopchr = chop ($bkmrk_url);
 if ($DEBUG) {print "chopper chr: $chopchr\n";}
 my $backpedal;
 ($chopchr eq '/') ? ($backpedal = 2): ($backpedal = 1);
 if ($DEBUG) {print "backpedal: $backpedal \n";}
 my $path=uri_unescape($pathseg[scalar @pathseg - $backpedal]);
 $path =~ s/-/ /g;
-if ($DEBUG) {print "title: $path";}
+print "title: $path" if $DEBUG;
     
 my $cui = new Curses::UI( -color_support => 1 );
 my $win1 = $cui->add('win1', 'Window',
@@ -109,7 +117,7 @@ $title_entry = $win1->add("ent1", "TextEntry",
     -width => 50,
     );
 
-$cui->set_binding( sub{exit 0;}, "q");
+$cui->set_binding( sub{exit 0;}, "\cq");
 $cui->set_binding(\&send_off,KEY_ENTER());
 $cui->mainloop; 
 
@@ -127,20 +135,16 @@ sub send_off() {
         Proc::Daemon::Init();
     }
                                                                                                                                                                                                                                                  
-    my $pin = Net::Delicious->new({
-        user => $pinboard_username,
-        pswd => $pinboard_password,
-        endpoint => "https://api.pinboard.in/v1/",
-        #debug    => 1
-    });
-    my $result = $pin->add_post({
-        url   => $url,
-        description => $title, 
-        tags => $tag,
-    });
-    if (!$result) {
-        # Must be an error
-        # No idea what to do though other than exit...
+    my $safe_desc=uri_escape($title);
+    my $pinboard_url = $API_URL . "url=$bkmrk_url&tags=$tag&shared=no&toread=yes&description=$safe_desc&auth_token=$API_token";
+    my $content = `curl -s \"$pinboard_url\"`;
+
+    if ($content =~ m!<result code="done" />!){
+        #    print "Added to Pinboard\n";
+    }else{
+        print "Something went wrong, not added. ";
+        print "See response: $content" if $content;
     }
+
     exit 0;                                                                                                                                                                                                                                                                            
 }
